@@ -1,7 +1,8 @@
 use core::time;
-use std::{time::{Instant, Duration}, sync::RwLockWriteGuard, ops::Index};
+use std::{time::{Instant, Duration}, sync::RwLockWriteGuard, ops::Index, cell};
 
 use console_engine::{screen::Screen, pixel, Color, ConsoleEngine, KeyCode};
+use rand::{Rng, rngs::ThreadRng, seq::SliceRandom};
 
 
 const WIDTH: i32 = 50;
@@ -11,14 +12,14 @@ const RECT_LOWER_Y: i32 = 30;
 
 
 struct Shape {
-    shape: &'static str,
-    x: i32,
-    y: i32,
     slices: Vec<Slice>,
+    color:  Color,
 }
 
 impl Shape {
-    fn new(shape: &'static str, x: i32, y: i32) -> Shape {
+    fn new(shape: &'static str) -> Shape {
+        let colors = vec![Color::DarkGrey, Color::Red, Color::DarkRed, Color::Green, Color::DarkGreen, Color::Yellow, Color::DarkYellow, Color::Blue, Color::DarkBlue, Color::Magenta, Color::DarkMagenta, Color::Cyan, Color::DarkCyan];
+        
         let default_x = 3;
         let default_y = 3;
         let mut slices: Vec<Slice> = vec![];
@@ -28,24 +29,58 @@ impl Shape {
 
             slices.push(Slice::new(default_x+x_offset, default_y+(y_offset as i32), slice.trim()));
         }
-        Shape { shape, x, y, slices }
+
+        let rand_color = colors.choose(&mut rand::thread_rng()).unwrap().clone();
+        Shape { slices, color: rand_color} 
     }
 
     fn bar() -> Shape {
-        let l_shape = "#####\r\
-                    # \n\
-                    # \n\
-                    # ";
-        Shape::new(l_shape, 3, 3)
+        let l_shape = "##\n##\n##\n##\n##";
+        Shape::new(l_shape)
+    }
 
+    fn cube() -> Shape {
+        let l_shape = "####\n####";
+        Shape::new(l_shape)
+    }
+
+    fn z_shape() -> Shape {
+        let l_shape = "####\n  ####";
+        Shape::new(l_shape)
+    }
+
+    fn s_shape() -> Shape {
+        let l_shape = "  ####\n####";
+        Shape::new(l_shape)
     }
 
     fn l_shape() -> Shape {
-        let l_shape = "    #\n\
-                       #####";
-        let l_shape = "###\n  ###";
-        
-        Shape::new(l_shape, 3, 3)
+        let l_shape = "    ##\n######";
+        Shape::new(l_shape)
+    }
+
+    fn j_shape() -> Shape {
+        let l_shape = "######\n    ##";
+        Shape::new(l_shape)
+    }
+
+    fn t_shape() -> Shape {
+        let l_shape = "######\n  ##  ";
+        Shape::new(l_shape)
+    }
+
+    fn random_shape(rng: &mut ThreadRng) -> Shape {
+        let i = rng.gen_range(0..7);
+        return match i {
+            0 => Shape::bar(),
+            1 => Shape::cube(),
+            2 => Shape::z_shape(),
+            3 => Shape::s_shape(),
+            4 => Shape::l_shape(),
+            5 => Shape::j_shape(),
+            6 => Shape::t_shape(),
+            _ => panic!("Impossible lol"),
+        };
     }
 
     fn go_down(&mut self) {
@@ -82,13 +117,14 @@ impl Slice {
 
 fn main() {
 
+    let mut rng = rand::thread_rng();
     let mut engine = ConsoleEngine::init(WIDTH as u32, HEIGHT as u32, 80).unwrap();
     let mut stopwatch = Instant::now();
     let mut old_frame_count = 0;
     let mut elapsed_frames = 0;
 
     let mut inactive_shapes: Vec<Shape> = vec![];
-    let mut active_shape = Shape::l_shape();
+    let mut active_shape = Shape::random_shape(&mut rng);
 
     loop {
         engine.wait_frame();
@@ -100,13 +136,13 @@ fn main() {
         // print inactive shapes
         for shape in &inactive_shapes {
             for slice in &shape.slices {
-                engine.print_fbg(slice.x, slice.y, slice.filling, Color::White, Color::Blue);
+                engine.print_fbg(slice.x, slice.y, slice.filling, shape.color, shape.color);
             }
         }
 
         // print active shape
         for slice in &active_shape.slices {
-            engine.print_fbg(slice.x, slice.y, slice.filling, Color::White, Color::Blue);
+            engine.print_fbg(slice.x, slice.y, slice.filling, active_shape.color, active_shape.color);
         }
 
         // go down one unit per second or if s is pressed
@@ -115,7 +151,7 @@ fn main() {
                 active_shape.go_down();
             } else {
                 // game over if stack too high
-                if active_shape.slices.last().unwrap().y == 3 {
+                if active_shape.slices.first().unwrap().y == 3 {
                     break
                 }
 
@@ -123,13 +159,13 @@ fn main() {
                 inactive_shapes.push(active_shape);
     
                 // generate new active shape
-                active_shape = Shape::l_shape();
+                active_shape = Shape::random_shape(&mut rng)
+                
             }
         }
 
-        // debug coordinates and shape counter
-        engine.print(10, 0, format!("Y:{} X:{}", active_shape.y, active_shape.x).as_str());
-        engine.print(23, 0, format!("{}", active_shape.slices[0].filling.chars().count()).as_str());
+        // debug coordinates
+        // engine.print(10, 0, format!("Y:{} X:{}", active_shape.y, active_shape.x).as_str());
 
         // FPS counter
         if stopwatch.elapsed().as_millis() >= Duration::from_millis(1000).as_millis() {
@@ -147,6 +183,11 @@ fn main() {
             break
         }
 
+        // change rotation
+        if engine.is_key_pressed(KeyCode::Char('a')) {
+            // change rotation
+        }
+
         // LEFT
         else if engine.is_key_pressed(KeyCode::Char('q')) {
             if !has_collision(&inactive_shapes, &active_shape, "x-") {
@@ -160,7 +201,6 @@ fn main() {
                 active_shape.go_right()
             }
         }
-    
 
         engine.draw();
     }
@@ -177,19 +217,21 @@ fn has_collision(inactive_shapes: &Vec<Shape>, active_shape: &Shape, direction_c
                 if slice.x + slice.filling.chars().count() as i32 >= RECT_LOWER_X {
                     return true
                 }
-            }
 
-            // 2 shapes can't have overlaying cells
-            /* for inactive_shape in inactive_shapes {
-                for i in 0..active_shape.len {
-                    for j in 0..inactive_shape.len {
-                        // can't have shared x pos on the same y pos
-                        if active_shape.x+active_shape.len == inactive_shape.x && active_shape.y == inactive_shape.y {
-                            return true
-                        }   
+                for (i, _) in slice.filling.chars().enumerate() {
+                    let cell_x_pos = slice.x + i as i32;
+                    for inactive_shape in inactive_shapes {
+                        for inactive_slice in &inactive_shape.slices {
+                            for (j, _) in inactive_slice.filling.chars().enumerate() {
+                                let inactive_cell_x_pos = inactive_slice.x + j as i32;
+                                if cell_x_pos + 1 == inactive_cell_x_pos && slice.y == inactive_slice.y {
+                                    return true
+                                }
+                            }
+                        }
                     }
                 }
-            } */
+            }
         },
         // move left
         "x-" => {
@@ -198,19 +240,21 @@ fn has_collision(inactive_shapes: &Vec<Shape>, active_shape: &Shape, direction_c
                 if slice.x - 1 <= 0 {
                     return true
                 }
-            }
 
-            // 2 shapes can't have overlaying cells
-            /* for inactive_shape in inactive_shapes {
-                for i in 0..active_shape.len {
-                    for j in 0..inactive_shape.len {
-                        // can't have shared x pos on the same y pos
-                        if active_shape.x-1 == inactive_shape.x+inactive_shape.len-1 && active_shape.y == inactive_shape.y {
-                            return true
-                        }   
+                for (i, _) in slice.filling.chars().enumerate() {
+                    let cell_x_pos = slice.x + i as i32;
+                    for inactive_shape in inactive_shapes {
+                        for inactive_slice in &inactive_shape.slices {
+                            for (j, _) in inactive_slice.filling.chars().enumerate() {
+                                let inactive_cell_x_pos = inactive_slice.x + j as i32;
+                                if cell_x_pos - 1 == inactive_cell_x_pos && slice.y == inactive_slice.y {
+                                    return true
+                                }
+                            }
+                        }
                     }
                 }
-            } */
+            }
         },
         // move down
         "y+" => {
@@ -219,19 +263,22 @@ fn has_collision(inactive_shapes: &Vec<Shape>, active_shape: &Shape, direction_c
                 if slice.y + 1 >= RECT_LOWER_Y {
                     return true
                 }
-            }
 
-            // 2 shapes can't have overlaying cells
-            /* for inactive_shape in inactive_shapes {
-                for i in 0..active_shape.len {
-                    for j in 0..inactive_shape.len {
-                        // can't have shared x pos on the same y pos
-                        if active_shape.x + i == inactive_shape.x + j && active_shape.y+1 == inactive_shape.y {
-                            return true
-                        }   
+                for (i, _) in slice.filling.chars().enumerate() {
+                    let cell_x_pos = slice.x + i as i32;
+                    for inactive_shape in inactive_shapes {
+                        for inactive_slice in &inactive_shape.slices {
+                            for (j, _) in inactive_slice.filling.chars().enumerate() {
+                                let inactive_cell_x_pos = inactive_slice.x + j as i32;
+                                if cell_x_pos == inactive_cell_x_pos && slice.y + 1 == inactive_slice.y {
+                                    return true
+                                }
+                            }
+                        }
                     }
                 }
-            } */
+            }
+
             
         },
         _ => panic!("unknown direction change")
