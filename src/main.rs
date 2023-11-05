@@ -1,5 +1,5 @@
 use core::time;
-use std::{time::{Instant, Duration}, sync::RwLockWriteGuard, ops::Index, cell};
+use std::{time::{Instant, Duration}, sync::RwLockWriteGuard, ops::Index, cell, process::exit, thread};
 
 use console_engine::{screen::Screen, pixel, Color, ConsoleEngine, KeyCode};
 use rand::{Rng, rngs::ThreadRng, seq::SliceRandom};
@@ -13,6 +13,7 @@ const RECT_LOWER_Y: i32 = 30;
 
 struct Shape {
     slices: Vec<Slice>,
+    raw_slices: Vec<String>,
     color:  Color,
 }
 
@@ -23,19 +24,21 @@ impl Shape {
         let default_x = 3;
         let default_y = 3;
         let mut slices: Vec<Slice> = vec![];
+        let mut raw_slices: Vec<String> = vec![];
         for (y_offset, slice) in shape.split('\n').enumerate() {
             // calculate x axis offset for #
             let x_offset = (slice.chars().position(|c| c == '#').unwrap()) as i32;
 
-            slices.push(Slice::new(default_x+x_offset, default_y+(y_offset as i32), slice.trim()));
+            slices.push(Slice::new(default_x+x_offset, default_y+(y_offset as i32), slice.trim().to_string()));
+            raw_slices.push(String::from(slice));
         }
 
         let rand_color = colors.choose(&mut rand::thread_rng()).unwrap().clone();
-        Shape { slices, color: rand_color} 
+        Shape { slices, raw_slices, color: rand_color} 
     }
 
     fn bar() -> Shape {
-        let l_shape = "##\n##\n##\n##\n##";
+        let l_shape = "########";
         Shape::new(l_shape)
     }
 
@@ -45,17 +48,17 @@ impl Shape {
     }
 
     fn z_shape() -> Shape {
-        let l_shape = "####\n  ####";
+        let l_shape = "####  \n  ####";
         Shape::new(l_shape)
     }
 
     fn s_shape() -> Shape {
-        let l_shape = "  ####\n####";
+        let l_shape = "  ####\n####  ";
         Shape::new(l_shape)
     }
 
     fn l_shape() -> Shape {
-        let l_shape = "    ##\n######";
+        let l_shape = "######\n##    ";
         Shape::new(l_shape)
     }
 
@@ -100,16 +103,66 @@ impl Shape {
             slice.x += 1;
         }
     }
+
+    fn rotate(&mut self) {
+        // calculate closest and furthest x position for a shape
+        // one "block" is 2 chars ##
+        let mut closest_x = WIDTH;
+        let mut furthest_x = 0;
+        for slice in &self.slices {
+            if slice.x < closest_x {
+                closest_x = slice.x;
+            }
+            if slice.x + (slice.filling.chars().count() as i32) > furthest_x {
+                furthest_x = slice.x + (slice.filling.chars().count() as i32);
+            }
+        }
+
+        // TODO: When rotating, check for collision
+
+        let new_number_of_slices = (furthest_x - closest_x) / 2;
+        let mut new_slices: Vec<Slice> = vec![];
+        let mut new_raw_slices: Vec<String> = vec![];
+
+        for next_slice_offset in 0..new_number_of_slices {
+            let mut new_starting_x_pos = closest_x;
+            let new_starting_y_pos = self.slices[0].y + next_slice_offset;
+            let mut new_raw_slice: String = String::new();
+            let mut found_first_block = false;
+
+            for raw_slice in &mut self.raw_slices.iter().rev() {
+                // block can be "  " or "##"
+                let block: String = raw_slice.chars().skip((next_slice_offset*2) as usize).take(2).collect();
+                new_raw_slice.push_str(block.as_str());
+                
+                // starting position is where the first # appears
+                if !found_first_block {
+                    if new_raw_slice.contains("#") {
+                        new_starting_x_pos += new_raw_slice.chars().position(|c| c == '#').unwrap() as i32;
+                        found_first_block = true;
+                    } 
+                }
+            }
+
+            new_raw_slices.push(new_raw_slice.clone());
+            new_slices.push(Slice::new(new_starting_x_pos, new_starting_y_pos, new_raw_slice.trim().to_string()));
+        }
+
+        // swap slices
+        self.raw_slices = new_raw_slices;
+        self.slices = new_slices;
+    }
+
 }
 
 struct Slice {
     x: i32, // start where first # is found
     y: i32, // different y pos per slice
-    filling: &'static str,
+    filling: String,
 }
 
 impl Slice {
-    fn new(x: i32, y: i32, filling: &'static str) -> Slice {
+    fn new(x: i32, y: i32, filling: String) -> Slice {
         Slice { x, y, filling }
     }
 }
@@ -124,7 +177,8 @@ fn main() {
     let mut elapsed_frames = 0;
 
     let mut inactive_shapes: Vec<Shape> = vec![];
-    let mut active_shape = Shape::random_shape(&mut rng);
+    //let mut active_shape = Shape::random_shape(&mut rng);
+    let mut active_shape = Shape::s_shape();
 
     loop {
         engine.wait_frame();
@@ -136,13 +190,13 @@ fn main() {
         // print inactive shapes
         for shape in &inactive_shapes {
             for slice in &shape.slices {
-                engine.print_fbg(slice.x, slice.y, slice.filling, shape.color, shape.color);
+                engine.print_fbg(slice.x, slice.y, slice.filling.as_str(), shape.color, shape.color);
             }
         }
 
         // print active shape
         for slice in &active_shape.slices {
-            engine.print_fbg(slice.x, slice.y, slice.filling, active_shape.color, active_shape.color);
+            engine.print_fbg(slice.x, slice.y, slice.filling.as_str(), active_shape.color, active_shape.color);
         }
 
         // go down one unit per second or if s is pressed
@@ -164,8 +218,8 @@ fn main() {
             }
         }
 
-        // debug coordinates
-        // engine.print(10, 0, format!("Y:{} X:{}", active_shape.y, active_shape.x).as_str());
+        // debug stuff
+        // engine.print(10, 0, format!("{}", active_shape.rotate()).as_str());
 
         // FPS counter
         if stopwatch.elapsed().as_millis() >= Duration::from_millis(1000).as_millis() {
@@ -184,8 +238,8 @@ fn main() {
         }
 
         // change rotation
-        if engine.is_key_pressed(KeyCode::Char('a')) {
-            // change rotation
+        if engine.is_key_pressed(KeyCode::Char('z')) {
+            active_shape.rotate();
         }
 
         // LEFT
