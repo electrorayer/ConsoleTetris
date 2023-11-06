@@ -7,7 +7,7 @@ use rand::{Rng, rngs::ThreadRng, seq::SliceRandom};
 
 const WIDTH: i32 = 50;
 const HEIGHT: i32 = 50;
-const RECT_LOWER_X: i32 = 30;
+const RECT_LOWER_X: i32 = 31;
 const RECT_LOWER_Y: i32 = 30;
 
 
@@ -94,13 +94,13 @@ impl Shape {
 
     fn go_left(&mut self) {
         for slice in &mut self.slices {
-            slice.x -= 1;
+            slice.x -= 2;
         }
     }
 
     fn go_right(&mut self) {
         for slice in &mut self.slices {
-            slice.x += 1;
+            slice.x += 2;
         }
     }
 
@@ -151,7 +151,24 @@ impl Shape {
         // swap slices
         self.raw_slices = new_raw_slices;
         self.slices = new_slices;
-    }
+
+        // if block goes out of bounds on the right side, go left
+        let mut collision = false;
+        let mut misplaced_blocks = 0;
+        for slice in &self.slices {
+            if slice.x + slice.filling.chars().count() as i32 - 1  >= RECT_LOWER_X {
+                misplaced_blocks = (slice.x + slice.filling.chars().count() as i32 - RECT_LOWER_X) / 2;
+                collision = true;
+                break;
+            }
+        }
+
+        for _ in 0..misplaced_blocks {
+            self.go_left();
+        }
+        
+
+    }    
 
 }
 
@@ -178,7 +195,7 @@ fn main() {
 
     let mut inactive_shapes: Vec<Shape> = vec![];
     //let mut active_shape = Shape::random_shape(&mut rng);
-    let mut active_shape = Shape::s_shape();
+    let mut active_shape = Shape::t_shape();
 
     loop {
         engine.wait_frame();
@@ -239,7 +256,15 @@ fn main() {
 
         // change rotation
         if engine.is_key_pressed(KeyCode::Char('z')) {
+            // rotate
             active_shape.rotate();
+
+
+            // check collision
+            if has_collision(&inactive_shapes, &active_shape, "rotate") {
+                panic!("Collided with another shape");
+            }
+
         }
 
         // LEFT
@@ -263,79 +288,66 @@ fn main() {
 }
 
 fn has_collision(inactive_shapes: &Vec<Shape>, active_shape: &Shape, direction_change: &str) -> bool {
-    match direction_change {
-        // move right
-        "x+" => {
-            // hit right wall
-            for slice in active_shape.slices.iter() {
+    for slice in active_shape.slices.iter() {
+        match direction_change {
+            "x+" => {
                 if slice.x + slice.filling.chars().count() as i32 >= RECT_LOWER_X {
                     return true
                 }
-
-                for (i, _) in slice.filling.chars().enumerate() {
-                    let cell_x_pos = slice.x + i as i32;
-                    for inactive_shape in inactive_shapes {
-                        for inactive_slice in &inactive_shape.slices {
-                            for (j, _) in inactive_slice.filling.chars().enumerate() {
-                                let inactive_cell_x_pos = inactive_slice.x + j as i32;
-                                if cell_x_pos + 1 == inactive_cell_x_pos && slice.y == inactive_slice.y {
-                                    return true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        // move left
-        "x-" => {
-            // hit left wall
-            for slice in active_shape.slices.iter() {
+            },
+            "x-" => {
                 if slice.x - 1 <= 0 {
                     return true
                 }
-
-                for (i, _) in slice.filling.chars().enumerate() {
-                    let cell_x_pos = slice.x + i as i32;
-                    for inactive_shape in inactive_shapes {
-                        for inactive_slice in &inactive_shape.slices {
-                            for (j, _) in inactive_slice.filling.chars().enumerate() {
-                                let inactive_cell_x_pos = inactive_slice.x + j as i32;
-                                if cell_x_pos - 1 == inactive_cell_x_pos && slice.y == inactive_slice.y {
-                                    return true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        // move down
-        "y+" => {
-            // hit bottom
-            for slice in active_shape.slices.iter() {
+            },
+            "y+" => {
                 if slice.y + 1 >= RECT_LOWER_Y {
                     return true
                 }
+            },
+            "rotate" => {
+                if (slice.x + slice.filling.chars().count() as i32 - 1 >= RECT_LOWER_X) || (slice.x <= 0) || (slice.y >= RECT_LOWER_Y) {
+                    return true
+                }
+            },
+            _ => panic!("unknown direction change"),
+        }
+        
 
-                for (i, _) in slice.filling.chars().enumerate() {
-                    let cell_x_pos = slice.x + i as i32;
-                    for inactive_shape in inactive_shapes {
-                        for inactive_slice in &inactive_shape.slices {
-                            for (j, _) in inactive_slice.filling.chars().enumerate() {
-                                let inactive_cell_x_pos = inactive_slice.x + j as i32;
+        for (i, _) in slice.filling.chars().enumerate() {
+            let cell_x_pos = slice.x + i as i32;
+            for inactive_shape in inactive_shapes {
+                for inactive_slice in &inactive_shape.slices {
+                    for (j, _) in inactive_slice.filling.chars().enumerate() {
+                        let inactive_cell_x_pos = inactive_slice.x + j as i32;
+                        match direction_change {
+                            "x+" => {
+                                if cell_x_pos + 1 == inactive_cell_x_pos && slice.y == inactive_slice.y {
+                                    return true
+                                }
+                            },
+                            "x-" => {
+                                if cell_x_pos - 1 == inactive_cell_x_pos && slice.y == inactive_slice.y {
+                                    return true
+                                }
+                            },
+                            "y+" => {
                                 if cell_x_pos == inactive_cell_x_pos && slice.y + 1 == inactive_slice.y {
                                     return true
                                 }
-                            }
+                            },
+                            "rotate" => {
+                                if cell_x_pos == inactive_cell_x_pos && slice.y == inactive_slice.y {
+                                    // 2 cells can't have the same coordinates
+                                    return true
+                                }
+                            },
+                            _ => panic!("unknown direction change"),
                         }
                     }
                 }
             }
-
-            
-        },
-        _ => panic!("unknown direction change")
+        }
     }
 
     false
